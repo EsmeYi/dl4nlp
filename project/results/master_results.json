@@ -1,0 +1,164 @@
+{
+  "baselines": {
+    "static_features": {
+      "method": "Static features (Ridge)",
+      "params_M": 0,
+      "test_r2": 0.06297874450683594
+    },
+    "bm25_nl_to_code": {
+      "method": "BM25 (NL\u2192Code)",
+      "test_recall1": 0.0615,
+      "test_recall5": 0.131,
+      "test_recall10": 0.171
+    },
+    "bm25_code_to_nl": {
+      "method": "BM25 (Code\u2192NL)",
+      "test_recall1": 0.0255,
+      "test_recall5": 0.1275,
+      "test_recall10": 0.1665
+    },
+    "codebert_zeroshot": {
+      "method": "CodeBERT zero-shot",
+      "params_M": 128.1,
+      "test_r2": 0.236545
+    },
+    "unixcoder_zeroshot": {
+      "method": "UniXcoder zero-shot",
+      "params_M": 129.4,
+      "test_r2": 0.160246
+    },
+    "codebert_finetuned": {
+      "method": "CodeBERT fine-tuned",
+      "params_M": 128.1,
+      "test_recall1": 0.4625,
+      "test_recall5": 0.746,
+      "test_recall10": 0.838,
+      "test_r2": 0.784213
+    },
+    "unixcoder_finetuned": {
+      "method": "UniXcoder fine-tuned",
+      "params_M": 129.4,
+      "test_recall1": 0.5465,
+      "test_recall5": 0.7975,
+      "test_recall10": 0.883,
+      "test_r2": 0.821074
+    }
+  },
+  "our_models": {
+    "baseline": {
+      "method": "Ours (InfoNCE + IPC head)",
+      "params_M": 10.9,
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "test_recall1_mean": 0.6396666566530863,
+      "test_recall1_std": 0.0038586089643697272,
+      "test_recall5_mean": 0.8629999955495199,
+      "test_recall5_std": 0.005354131418950142,
+      "test_recall10_mean": 0.9190000096956888,
+      "test_recall10_std": 0.0038944388085239406,
+      "test_r2_mean": 0.7158876666666666,
+      "test_r2_std": 0.005181699163616307,
+      "per_seed": [
+        {
+          "seed": 42,
+          "recall1": 0.6380000114440918,
+          "recall5": 0.8569999933242798,
+          "recall10": 0.9135000109672546,
+          "r2": 0.708651
+        },
+        {
+          "seed": 43,
+          "recall1": 0.6449999809265137,
+          "recall5": 0.8700000047683716,
+          "recall10": 0.921999990940094,
+          "r2": 0.718507
+        },
+        {
+          "seed": 44,
+          "recall1": 0.6359999775886536,
+          "recall5": 0.8619999885559082,
+          "recall10": 0.921500027179718,
+          "r2": 0.720505
+        }
+      ]
+    },
+    "improved": {
+      "method": "Ours + IPC-aware label smoothing",
+      "params_M": 10.9,
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "test_recall1_mean": 0.6443333228429159,
+      "test_recall1_std": 0.008219209542955115,
+      "test_recall5_mean": 0.8663333455721537,
+      "test_recall5_std": 0.0016499086297064652,
+      "test_recall10_mean": 0.9170000155766805,
+      "test_recall10_std": 0.0016329964712711142,
+      "test_r2_mean": 0.716665,
+      "test_r2_std": 0.004965305495804553
+    }
+  },
+  "scaling_curve": [
+    {
+      "fraction": 0.05,
+      "train_samples": 15495,
+      "test_recall1": 0.33399999141693115,
+      "test_recall5": 0.5924999713897705,
+      "test_recall10": 0.7139999866485596,
+      "test_r2": 0.52384
+    },
+    {
+      "fraction": 0.1,
+      "train_samples": 30991,
+      "test_recall1": 0.4449999928474426,
+      "test_recall5": 0.7204999923706055,
+      "test_recall10": 0.8080000281333923,
+      "test_r2": 0.610901
+    },
+    {
+      "fraction": 0.25,
+      "train_samples": 77478,
+      "test_recall1": 0.5724999904632568,
+      "test_recall5": 0.8240000009536743,
+      "test_recall10": 0.8845000267028809,
+      "test_r2": 0.655
+    },
+    {
+      "fraction": 0.5,
+      "train_samples": 154956,
+      "test_recall1": 0.6290000081062317,
+      "test_recall5": 0.8600000143051147,
+      "test_recall10": 0.9164999723434448,
+      "test_r2": 0.689237
+    },
+    {
+      "fraction": 0.75,
+      "train_samples": 232434,
+      "test_recall1": 0.6315000057220459,
+      "test_recall5": 0.8619999885559082,
+      "test_recall10": 0.9160000085830688,
+      "test_r2": 0.710531
+    },
+    {
+      "fraction": 1.0,
+      "train_samples": 309913,
+      "test_recall1": 0.656000018119812,
+      "test_recall5": 0.8715000152587891,
+      "test_recall10": 0.9225000143051147,
+      "test_r2": 0.71918
+    }
+  ],
+  "hw_aware": {
+    "hw_precision_at1": 0.7636,
+    "hw_precision_at5": 0.741,
+    "hw_precision_at10": 0.7252,
+    "random_baseline": 0.4856,
+    "mean_delta_ipc_top1": 0.3614,
+    "random_delta_ipc": 0.9525
+  }
+}

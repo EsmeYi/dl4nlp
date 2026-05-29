@@ -1,0 +1,16 @@
+{
+  "fraction": 0.05,
+  "train_samples": 15495,
+  "seed": 42,
+  "val_recall1": 0.3395000100135803,
+  "val_recall5": 0.6274999976158142,
+  "val_recall10": 0.7264999747276306,
+  "val_r2": 0.516446,
+  "test_recall1": 0.33399999141693115,
+  "test_recall5": 0.5924999713897705,
+  "test_recall10": 0.7139999866485596,
+  "test_r2": 0.52384,
+  "avg_train_loss": 0.9010562340936243,
+  "training_seconds": 3600.178072452545,
+  "num_steps": 9632
+}
