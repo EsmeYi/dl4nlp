@@ -137,3 +137,46 @@
 **Q: Why does RAG still get 31% of answers wrong despite 96% retrieval accuracy?**
 
 > Even when the correct document is retrieved, the model may still fail to extract the right answer. Reasons include: (1) the relevant sentence is in a chunk that wasn't retrieved, (2) the model misinterprets the context, or (3) the prompt format causes the model to generate an explanation instead of a clean Yes/No.
+
+---
+
+# Presentation Speeches (5 minutes each)
+
+---
+
+## Speech: Task 4.1 — RAG Pipeline
+
+**Context and background:**
+In Assignment 4, the task is to answer medical yes/no questions from the PubMedQA dataset. A plain language model struggles with this because it lacks domain-specific medical knowledge and tends to hallucinate. The solution is RAG — Retrieval-Augmented Generation — which first retrieves relevant paper abstracts from a database, then uses those as context for the model to answer.
+
+**My solution:**
+I implemented Option A: a RAG Agent using LangChain. The pipeline has three components working together.
+
+First, an embedding model (MiniLM-L6-v2) converts all paper abstracts into vectors and stores them in a Chroma vector database. The documents are chunked into 512-token pieces first, because the embedding model has a context limit and because smaller chunks give more precise retrieval.
+
+Second, I implemented `RetrieveDocumentsMiddleware` — a class that intercepts the user's question before it reaches the LLM. It embeds the question, searches Chroma for the most similar document chunk, and builds an augmented prompt: "Based on the following context, answer Yes or No: [document]. Question: [question]."
+
+Third, the LLM (Llama 3.1-8B-Instruct) receives this augmented prompt and generates the answer.
+
+**Results:** On 100 test questions, RAG achieved accuracy 0.69 and F1 0.76, compared to 0.49 accuracy for the no-retrieval baseline. The vector store retrieved the correct paper in 96% of cases, confirming the embedding-based search works well.
+
+**How I used AI tools:**
+I used Claude to understand the architecture — specifically what chunking is and why it's necessary, and how the middleware pattern works in LangChain. Most of the implementation followed directly from the assignment description once I understood the concepts. The main challenge was dependency management (LangChain API changes across versions), which Claude helped debug by identifying that `langchain.text_splitter` had been moved to `langchain_text_splitters`.
+
+---
+
+## Speech: Task 5.1/5.2 — Evaluation
+
+**Context and background:**
+After building the RAG pipeline, I evaluated it quantitatively by running it on 100 medical questions and comparing to a baseline without retrieval.
+
+**My solution:**
+For each question, I run the RAG agent and extract the yes/no prediction from the output using a simple function that checks if the response starts with "yes" or "no". I compare this to the gold label and compute accuracy and F1 score. F1 is important here because the dataset may have class imbalance between yes/no answers.
+
+For Task 5.2, I checked retrieval quality by comparing the retrieved document's ID against the `gold_document_id` in the dataset — the ID of the paper that actually contains the answer.
+
+**Results:** RAG accuracy 0.69 vs baseline 0.49. The 96% retrieval accuracy shows the vector search is finding the right paper almost always. The remaining 31% error rate despite correct retrieval suggests the model sometimes misinterprets the context or the relevant sentence is not in the retrieved chunk.
+
+**How I used AI tools:**
+The evaluation structure was straightforward to implement. Claude helped me think through the evaluation design — specifically why F1 is preferable to accuracy when classes may be imbalanced, and how to handle cases where the model doesn't produce a clean yes/no (which I handle by counting only "valid answers").
+

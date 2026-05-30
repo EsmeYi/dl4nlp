@@ -150,3 +150,40 @@
 > 1. **Scale**: OLMo-2 has ~1B parameters trained on hundreds of billions of tokens; ours has ~6M parameters trained on ~150k Wikipedia paragraphs.
 > 2. **Tokenization**: OLMo-2 uses BPE subword tokenization (no `<UNK>`); ours uses a word-level vocabulary with an `<UNK>` fallback for rare words.
 > 3. **Output quality**: OLMo-2 generates fluent, coherent, factually reasonable text; our model generates grammatically plausible structure but with most content words replaced by `<UNK>`, showing it has learned syntax but not sufficient vocabulary or world knowledge.
+
+---
+
+# Presentation Speeches (5 minutes each)
+
+---
+
+## Speech: Task 1.3 — Multi-Head Attention with RoPE
+
+**Context and background:**
+In Assignment 2, I reimplemented a Transformer language model following the OLMo-2 architecture. The core innovation of Transformers over RNNs is the attention mechanism: instead of passing information through a sequential hidden state, every token can directly attend to every other token. My task was to implement Multi-Head Attention with Rotary Position Embeddings.
+
+**My solution:**
+The attention module has four linear projections: W_q, W_k, W_v, W_o. The forward pass reshapes Q, K, V from shape (B, N, H) to (B, n_heads, N, d_head), applies RoPE to Q and K to encode position information, then calls `scaled_dot_product_attention` with `is_causal=True` to prevent each position from attending to future tokens. Finally, the heads are concatenated and projected back through W_o.
+
+RoPE encodes position by rotating Q and K vectors by an angle proportional to their position. The key property is that the dot product Q·Kᵀ depends only on the relative distance between positions, not absolute positions. This makes the model generalize better to different sequence lengths.
+
+I also added `q_norm` and `k_norm` (RMSNorm on queries and keys) which stabilizes training in deep models by preventing attention scores from growing too large.
+
+**How I used AI tools:**
+I used Claude to understand the conceptual difference between Q, K, and V — Q is "what I'm looking for", K is "what I can offer", V is "what I actually pass on". The scaling by √d_h was something I understood from the explanation that dot products grow in magnitude with dimension, so without scaling the softmax would saturate. I worked through the tensor reshape operations myself by tracking the shapes step by step.
+
+---
+
+## Speech: Task 3.3 — Comparison with OLMo-2
+
+**Context and background:**
+After training my Transformer from scratch, I compared its text generation quality to OLMo-2 1B — a model trained on hundreds of billions of tokens with 1 billion parameters, versus my ~6 million parameter model trained on ~150,000 Wikipedia paragraphs.
+
+**My solution:**
+I wrote a comparison script that runs both models on three prompts: one about NLP/Transformers, one about Stockholm/Sweden, and one about 20th century inventions. The script loads my model from the saved checkpoint and OLMo-2 from HuggingFace, then generates text with temperature=0.7 and top-k=50.
+
+The results were striking: my model produced mostly `<UNK>` tokens because many content words — including "Transformer" itself — were not frequent enough to be in my word-level vocabulary. OLMo-2, using BPE subword tokenization, never produces `<UNK>` and generates fluent, coherent text. Despite this, my model's validation perplexity of 51.1 showed it had learned syntactic patterns.
+
+**How I used AI tools:**
+The main challenge was a series of dependency conflicts — the cluster's PyTorch 2.1 was incompatible with newer versions of transformers needed to load OLMo-2. I worked through these with Claude, ultimately patching `import_utils.py` to bypass the version check. Claude explained why the `<UNK>` outputs happen (word-level vocabulary limitation) and helped me articulate the three key differences between the models: scale, tokenization, and training data.
+

@@ -125,3 +125,40 @@
 **Q: What do we expect to see in the nearest neighbors, and what does it tell us?**
 
 > We expect semantically similar words to be nearby. For example, "sweden" should be close to "denmark", "norway", "finland". If the model is well-trained, the geometry of the embedding space should reflect real-world relationships between words.
+
+---
+
+# Presentation Speeches (5 minutes each)
+
+---
+
+## Speech: Task 1.2 — Tokenizer
+
+**Context and background:**
+In Assignment 1, we're building a language model from scratch. Before the model can process text, we need to convert words into numbers — this is what the tokenizer does. The key design choice is building a word-level vocabulary from the training data.
+
+**My solution:**
+I implemented `build_tokenizer` and `A1Tokenizer`. The vocabulary is built by counting word frequencies in the training data using a `Counter`, then keeping the most frequent `max_vocab_size - 4` words. The minus 4 is because we reserve 4 special tokens: PAD (0), BOS (1), EOS (2), and UNK (3). Any word not in the vocabulary maps to UNK.
+
+The `A1Tokenizer.__call__` method takes a list of strings and returns a `BatchEncoding` — the HuggingFace standard format. For each sentence: tokenize by splitting on spaces, add BOS at the start and EOS at the end, truncate to max length, then pad to the same length on the right. The padding uses token ID 0 (PAD), and `attention_mask` is 1 for real tokens and 0 for padding.
+
+**How I used AI tools:**
+I used Claude to understand the design — specifically why we need special tokens and what each one does. Claude helped me understand that BOS tells the model "a sentence is starting" and EOS tells it "stop generating here". I implemented the Counter-based vocabulary myself after that explanation, and worked through the padding logic by reasoning about the tensor shapes.
+
+---
+
+## Speech: Task 3.1/3.2 — RNN Language Model
+
+**Context and background:**
+The goal is to build a language model that can predict the next word given a sequence of words. We use an LSTM (Long Short-Term Memory) network, which processes text sequentially — one token at a time — and maintains a hidden state that summarizes what it has seen so far.
+
+**My solution:**
+The model has three layers: an `Embedding` layer that converts token IDs into dense vectors, an `LSTM` that processes the sequence and outputs a hidden state at each position, and a `Linear` layer that projects the hidden state to vocabulary logits.
+
+The key implementation detail is the **loss shift**: during training, at position i the model should predict token i+1. So I shift the logits left by one (take `logits[:, :-1, :]`) and the labels right by one (take `labels[:, 1:]`). I also mask padding tokens by setting their labels to -100, which PyTorch's CrossEntropyLoss ignores automatically.
+
+Training used AdamW optimizer with teacher forcing — the model always sees the correct previous token during training, not its own predictions. After 3 epochs, validation perplexity reached 66.4.
+
+**How I used AI tools:**
+I used Claude to understand teacher forcing and the loss shift. The key insight I got from our discussion was that at position i, the logit predicts token i+1, so the targets need to be shifted. I then implemented the forward pass myself with that understanding. I also asked Claude to explain why padding should use -100 rather than 0 — the answer is that 0 is a valid token ID (PAD token), so using it as a label would confuse the model.
+

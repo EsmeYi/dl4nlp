@@ -147,3 +147,42 @@
 **Q: Why is the pretrained ROUGE-L already 0.575, not near zero?**
 
 > ROUGE-L measures the longest common subsequence between the generated text and the reference. Even without instruction tuning, the pretrained model generates plausible English text that shares common words and phrases with the reference answers — especially short, formulaic responses. This gives a non-trivial ROUGE-L baseline even without any fine-tuning.
+
+---
+
+# Presentation Speeches (5 minutes each)
+
+---
+
+## Speech: Task 4.2 — LoRA Layer
+
+**Context and background:**
+In Assignment 3, I fine-tuned SmolLM2-135M to follow instructions. The challenge is that fine-tuning all 135 million parameters is expensive. LoRA (Low-Rank Adaptation) solves this by keeping the original weights frozen and adding small trainable low-rank matrices. My task was to implement the `LoRALayer` class.
+
+**My solution:**
+`LoRALayer` is a drop-in replacement for `nn.Linear`. In `__init__`, I freeze the original weight matrix W by calling `W.requires_grad_(False)`. Then I create two new linear layers: A with shape (in_features → r) and B with shape (r → out_features), both without bias. A is initialized with Kaiming uniform, and B is initialized to all zeros.
+
+In `forward`, the output is `W(x) + (alpha/r) * B(A(x))`. At the start of training, B=0 means the LoRA term is zero, so the model behaves exactly like the original. Only A and B are trained.
+
+The rank r=8 means instead of updating a matrix of size (in × out), we only train two matrices of size (in × 8) and (8 × out) — about 100x fewer parameters for typical hidden sizes.
+
+**Results:** LoRA used only 921K parameters (0.7% of full SFT's 135M) and achieved ROUGE-L of 0.629, compared to full SFT's 0.674. A small gap in quality for a massive saving in computation.
+
+**How I used AI tools:**
+The key conceptual question I worked through with Claude was: why is B initialized to zero, not A? The answer is that if both were zero, the gradient through A would be zero and A could never update. B=0 ensures the initial output is unchanged, while A's non-zero initialization allows gradients to flow. I implemented the forward pass myself after understanding this.
+
+---
+
+## Speech: Task 1.2/1.3 — Data Formatting and Tokenization for SFT
+
+**Context and background:**
+Before fine-tuning, I needed to convert the SmolTalk instruction dataset into a format the model can learn from. This involves two steps: formatting messages into a structured prompt/response pair, and tokenizing them with the correct loss masking.
+
+**My solution:**
+For formatting (`format_input_output`), I used ChatML format — the same format SmolLM2 was pretrained with. Each message is wrapped as `<|im_start|>role\ncontent<|im_end|>\n`. The prompt includes all messages except the last assistant turn, ending with `<|im_start|>assistant\n`. The response is the assistant's reply plus `<|im_end|>`.
+
+For tokenization (`tokenize_helper`), I tokenize prompt and response separately using `add_special_tokens=False`, then concatenate the token IDs. The `labels` tensor is identical to `input_ids` except the prompt portion is replaced with -100. This tells PyTorch's CrossEntropyLoss to skip those positions — we only compute loss on the response tokens, teaching the model to generate answers, not to repeat the questions.
+
+**How I used AI tools:**
+I understood the ChatML format with Claude's help and chose it because SmolLM2 was pretrained with it. For the -100 masking I first thought the reason was to prevent the model from "seeing the answer", but Claude helped me correct this: the model DOES see the prompt as input — the masking only affects the loss computation. We want the model to learn to generate the response, so we only penalize it for the response tokens.
+
