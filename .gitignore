@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 *.pyo
 .DS_Store
+*_oral_exam_prep.md
