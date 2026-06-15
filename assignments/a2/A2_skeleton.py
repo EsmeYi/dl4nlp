@@ -22,21 +22,31 @@ class A2ModelConfig(PretrainedConfig):
 
 
 
+# ★ 🎓 Task 1.1: SwiGLU MLP
+# ReLU: hard zero-or-not; SwiGLU: learned gate x activation -> more expressive
+# forward: down_proj( gate_proj(x) * silu(up_proj(x)) ); shape (B,N,H) in/out
+# gate_proj(H->I) x silu(up_proj(H->I)) -> element-wise -> down_proj(I->H)
+# no bias: RMSNorm already shifts distribution; val perplexity 51.1 vs RNN 66.4
 class A2MLP(nn.Module):
     """The MLP layer of the Transformer. Uses the SwiGLU architecture."""
     def __init__(self, config):
         super().__init__()
         assert(config.hidden_act == 'silu')
-        H, I = config.hidden_size, config.intermediate_size
-        self.gate_proj = nn.Linear(H, I, bias=False)
-        self.up_proj   = nn.Linear(H, I, bias=False)
-        self.down_proj = nn.Linear(I, H, bias=False)
-        self.act = nn.SiLU()
+        H, I = config.hidden_size, config.intermediate_size  # H=576, I=1536
+        self.gate_proj = nn.Linear(H, I, bias=False)  # learned gate: H -> I
+        self.up_proj   = nn.Linear(H, I, bias=False)  # activation path: H -> I
+        self.down_proj = nn.Linear(I, H, bias=False)  # project back: I -> H
+        self.act = nn.SiLU()                           # smooth activation (Swish)
 
     def forward(self, hidden_states):
-        # SwiGLU: down_proj( gate_proj(x) * SiLU(up_proj(x)) )
+        # gate_proj(x): learned gate, controls which dimensions to keep
+        # up_proj(x) -> SiLU: smooth non-linearity on the activation path
+        # element-wise multiply: gate decides how much of each activation to pass
+        # down_proj: project the gated result back from I to H
+        # input/output shape: (B, N, H)
         return self.down_proj(self.gate_proj(hidden_states) * self.act(self.up_proj(hidden_states)))
 
+# Task 1.2: RMSNorm
 class A2RMSNorm(nn.Module):
     """RMS layer normalization (manual implementation for PyTorch < 2.4)."""
     def __init__(self, config):
@@ -52,6 +62,10 @@ def make_norm(config):
     return A2RMSNorm(config)
 
 
+# 🎓 Task 1.3: Multi-head attention with RoPE
+# Q=looking for, K=offers, V=returns; divide scores by sqrt(d_head) to stabilize softmax
+# reshape (B,N,H)->(B,n_heads,N,d_head); RoPE rotates Q,K by position angle
+# causal mask (is_causal=True): future positions -> -inf -> softmax weight ~0
 class A2Attention(nn.Module):
     """The multi-head attention layer of the Transformer. Uses standard scaled dot-product attention with causal masking."""
 
@@ -96,6 +110,9 @@ class A2Attention(nn.Module):
         return self.W_o(attn_out)
 
 
+# 🎓 Task 1.4: Transformer decoder layer
+# pre-norm + residual for both attention and MLP sub-blocks
+# residual = add input back to output -> shortcut for gradients -> prevents vanishing gradients
 class A2DecoderLayer(nn.Module):
     """A complete Transformer decoder layer."""
     def __init__(self, config):
@@ -121,6 +138,7 @@ class A2DecoderLayer(nn.Module):
         return hidden_states
 
 
+# Task 1.5: Full Transformer model
 class A2Transformer(PreTrainedModel):
     """A language model based on the Transformer architecture."""
     
@@ -167,7 +185,12 @@ class A2Transformer(PreTrainedModel):
 
 
 ###
-### Task 3.2: Text generation
+### 🎓 Task 3.2: Text generation
+### encode prompt -> logits at last position -> /temperature -> top-k(-inf) -> sample -> append -> repeat
+### low temperature=deterministic, high=random; stop at EOS or max_length
+###
+### 🎓 Task 3.3: Comparing to OLMo-2
+### scale: 6M vs 1B params; tokenizer: word-level+UNK vs BPE(no UNK); training data: small vs large
 ###
 
 def generate(model, tokenizer, prompt, max_length=100, temperature=1.0, topk=None, device='cpu'):

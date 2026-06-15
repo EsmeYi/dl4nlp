@@ -12,6 +12,12 @@ import sys, time, os
 ###
 ### Part 1. Tokenization.
 ###
+
+# ★ 🎓 Task 1.2: Building the vocabulary
+# Counter -> keep top (max_voc_size-4) words -> str_to_int + int_to_str dicts
+# Special tokens: PAD(0)=same length batch, BOS(1)=start, EOS(2)=stop, UNK(3)=unknown
+# Padding -> -100 in labels -> CrossEntropyLoss(ignore_index=-100) skips padding
+# UNK problem: rare words lost; BPE (OLMo-2) splits words into subpieces, no UNK
 def lowercase_tokenizer(text):
     return [t.lower() for t in nltk.word_tokenize(text)]
 
@@ -29,20 +35,20 @@ def build_tokenizer(train_file, tokenize_fun=lowercase_tokenizer, max_voc_size=N
              bos_token:         The dummy string corresponding to the beginning of the text.
              eos_token:         The dummy string corresponding to the end the text.
     """
-    counter = Counter()
+    counter = Counter()                          # counts word frequencies
     with open(train_file) as f:
         for line in f:
             if line.strip():
-                counter.update(tokenize_fun(line.strip()))
+                counter.update(tokenize_fun(line.strip()))  # tokenize + count each line
 
-    special_tokens = [pad_token, bos_token, eos_token, unk_token]
+    special_tokens = [pad_token, bos_token, eos_token, unk_token]  # 4 reserved tokens
 
-    n_real = (max_voc_size - len(special_tokens)) if max_voc_size else None
-    real_words = [word for word, _ in counter.most_common(n_real)]
+    n_real = (max_voc_size - len(special_tokens)) if max_voc_size else None  # slots for real words
+    real_words = [word for word, _ in counter.most_common(n_real)]  # top-N most frequent words
 
-    all_tokens = special_tokens + real_words
-    str_to_int = {tok: i for i, tok in enumerate(all_tokens)}
-    int_to_str = {i: tok for tok, i in str_to_int.items()}
+    all_tokens = special_tokens + real_words         # special tokens go first (IDs 0,1,2,3)
+    str_to_int = {tok: i for i, tok in enumerate(all_tokens)}   # word -> ID
+    int_to_str = {i: tok for tok, i in str_to_int.items()}      # ID -> word (for decoding)
 
     return A1Tokenizer(str_to_int, int_to_str,
                        pad_token=pad_token, unk_token=unk_token,
@@ -87,33 +93,32 @@ class A1Tokenizer:
 
         encoded = []
         for text in texts:
-            tokens = self.tokenize_fun(text)
-            # Wrap with BOS and EOS, then map to integers (unknown words → unk_token_id)
-            ids = [self.bos_token_id]
-            ids += [self.str_to_int.get(tok, self.unk_token_id) for tok in tokens]
-            ids += [self.eos_token_id]
+            tokens = self.tokenize_fun(text)             # split text into word tokens
+            ids = [self.bos_token_id]                    # prepend BOS
+            ids += [self.str_to_int.get(tok, self.unk_token_id) for tok in tokens]  # word->ID, unknown->UNK
+            ids += [self.eos_token_id]                   # append EOS
 
             if truncation and self.model_max_length:
-                ids = ids[:self.model_max_length]
+                ids = ids[:self.model_max_length]        # cut to max length if needed
 
             encoded.append(ids)
 
         if padding:
-            max_len = max(len(ids) for ids in encoded)
+            max_len = max(len(ids) for ids in encoded)  # length of longest sequence in batch
             attention_masks = []
             padded = []
             for ids in encoded:
-                n_pad = max_len - len(ids)
-                attention_masks.append([1] * len(ids) + [0] * n_pad)
-                padded.append(ids + [self.pad_token_id] * n_pad)
+                n_pad = max_len - len(ids)               # how many PAD tokens to add
+                attention_masks.append([1] * len(ids) + [0] * n_pad)  # 1=real, 0=padding
+                padded.append(ids + [self.pad_token_id] * n_pad)      # right-pad with PAD
             encoded = padded
         else:
-            attention_masks = [[1] * len(ids) for ids in encoded]
+            attention_masks = [[1] * len(ids) for ids in encoded]  # no padding, all real
 
         if return_tensors == 'pt':
             return BatchEncoding({
-                'input_ids': torch.tensor(encoded),
-                'attention_mask': torch.tensor(attention_masks),
+                'input_ids': torch.tensor(encoded),          # shape: (B, N)
+                'attention_mask': torch.tensor(attention_masks),  # shape: (B, N)
             })
         return BatchEncoding({'input_ids': encoded, 'attention_mask': attention_masks})
 
@@ -137,6 +142,11 @@ class A1Tokenizer:
 ### Part 3. Defining the model.
 ###
 
+# 🎓 Task 3.1: Setting up the RNN network
+# Embedding(B,N)->(B,N,E) -> LSTM(B,N,E)->(B,N,H) -> Linear(B,N,H)->(B,N,V)
+# batch_first=True: input shape (B,N,E) not (N,B,E)
+# hidden state = compressed summary of everything seen so far
+# weakness: info from early tokens diluted over long sequences
 class A1RNNModelConfig(PretrainedConfig):
     """Configuration object that stores hyperparameters that define the RNN-based language model."""
     def __init__(self, vocab_size=0, embedding_size=0, hidden_size=0, **kwargs):
@@ -173,7 +183,10 @@ class A1RNNModel(PreTrainedModel):
 
         loss = None
         if labels is not None:
-            # Shift: predict token i+1 from position i
+            # 🎓 Task 3.2: Computing the loss
+            # shift by 1: position i predicts position i+1 (next token prediction)
+            # without shift: model would predict itself (wrong)
+            # -100 in labels: CrossEntropyLoss skips padding (ignore_index=-100)
             shift_logits = logits[:, :-1, :].contiguous()   # (B, N-1, V)
             shift_labels = labels[:, 1:].contiguous()        # (B, N-1)
             loss = self.loss_func(
@@ -187,6 +200,12 @@ class A1RNNModel(PreTrainedModel):
 ###
 ### Part 4. Training the language model.
 ###
+
+# 🎓 Task 4.1: Implementing the trainer
+# each epoch: DataLoader -> tokenize -> labels=input_ids (PAD->-100) -> forward -> loss
+# zero_grad -> backward -> optimizer.step (AdamW)
+# eval: no_grad -> val_loss -> perplexity=exp(val_loss)
+# zero_grad needed: PyTorch accumulates gradients, previous batch adds to current
 
 ## Hint: the following TrainingArguments hyperparameters may be relevant for your implementation:
 #
@@ -291,7 +310,7 @@ class A1Trainer:
                     total_val_loss += out.loss.item()
 
             avg_val_loss = total_val_loss / len(val_loader)
-            val_perplexity = torch.exp(torch.tensor(avg_val_loss)).item()
+            val_perplexity = torch.exp(torch.tensor(avg_val_loss)).item()  # Task 5.2: Perplexity = exp(cross-entropy loss)
             print(f'Epoch {epoch+1}: train_loss={avg_train_loss:.3f}  val_loss={avg_val_loss:.3f}  val_ppl={val_perplexity:.1f}')
 
         print(f'Saving to {args.output_dir}.')
@@ -322,6 +341,13 @@ def predict_next_words(model, tokenizer, text, topk=5, device='cpu'):
         print(f'  {word:20s} {score.item():.3f}')
 
 
+# 🎓 Task 5.2: Perplexity = exp(cross_entropy_loss)
+# loss = mean(-log P(correct token)); perplexity = exp(loss) = "number of choices"
+# RNN val perplexity 66.4 after 3 epochs (random guess over 10k words = 10,000)
+
+# 🎓 Task 5.3: Inspecting word embeddings
+# similar context -> similar vectors; cosine similarity = angle (ignores length)
+# "three"->four,nine,six (numbers cluster); "sweden"->weak(0.28, rare proper noun)
 def nearest_neighbors(model, tokenizer, word, n_neighbors=10):
     """Task 5.3: Find the nearest neighbors of a word in embedding space."""
     emb = model.embedding

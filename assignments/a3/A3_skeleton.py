@@ -38,7 +38,47 @@ print(smoltalk_simplified)
 print(smoltalk_simplified['train'][0])
 
 # ----------------------------------------------------------------
-# Task 1.2: Format data for instruction tuning
+# ★ 🎓 Task 1.2: Format data for instruction tuning  [SELECTED FOR ORAL EXAM]
+#
+# FULL SPEECH (~5 min):
+#
+# SmolLM2-135M is pretrained to continue text — it just predicts the next word.
+# To make it follow instructions, I fine-tune it on examples of instructions
+# and responses. This is called Supervised Fine-Tuning, or SFT.
+# But first, the data has to be formatted correctly.
+#
+# CHATML FORMAT:
+# I used ChatML, which is what SmolLM2 was pretrained with. Each message is
+# wrapped as: <|im_start|>role\ncontent<|im_end|>
+# The prompt is all messages except the last assistant turn, plus the opening
+# <|im_start|>assistant\n tag. The response is the assistant reply + <|im_end|>.
+# Why ChatML specifically? These tokens are already in SmolLM2's vocabulary
+# and already mean "role boundary". Using a different format would require
+# the model to learn new conventions from scratch during fine-tuning.
+#
+# TOKENIZATION AND LOSS MASKING (Task 1.3):
+# I tokenize the prompt and response separately with add_special_tokens=False,
+# then concatenate. The labels tensor is the same length as input_ids, but the
+# prompt part is replaced with -100:
+#   labels = [-100] * len(prompt_ids) + response_ids
+# CrossEntropyLoss skips -100. So the model reads the full prompt as context,
+# but only gets a training signal on the response tokens.
+# IMPORTANT: -100 does NOT hide the prompt from the model. The model still
+# sees it through input_ids. Masking only affects which positions count toward
+# the loss.
+#
+# RESULTS:
+# Full SFT 1 epoch: ROUGE-L 0.575 -> 0.674. LoRA (0.7% of params): 0.629.
+#
+# KEY Q&A:
+# Q: Why ChatML and not another format?
+#   SmolLM2 was pretrained with these tokens. They're already in its vocabulary
+#   with learned meaning. A different format means learning from scratch.
+# Q: What does -100 masking do exactly?
+#   Tells CrossEntropyLoss to skip those positions. The model still sees the
+#   prompt as input — masking only affects the loss, not the input.
+# Q: Why tokenize prompt and response separately?
+#   So we know exactly where the prompt ends — where to place -100 in labels.
 # ----------------------------------------------------------------
 def format_input_output(example):
     """Convert a dataset example into a prompt/response pair.
@@ -53,19 +93,19 @@ def format_input_output(example):
 
     Returns: {"prompt": str, "response": str}
     """
-    messages = example['messages']
+    messages = example['messages']              # list of {role, content} dicts
 
     prompt_parts = []
-    for msg in messages[:-1]:
+    for msg in messages[:-1]:                  # all messages except the last (assistant reply)
         role = msg['role']
         content = msg['content']
-        prompt_parts.append(f"<|im_start|>{role}\n{content}<|im_end|>\n")
-    prompt_parts.append("<|im_start|>assistant\n")
-    prompt = "".join(prompt_parts)
+        prompt_parts.append(f"<|im_start|>{role}\n{content}<|im_end|>\n")  # ChatML wrap
+    prompt_parts.append("<|im_start|>assistant\n")   # open assistant turn (model continues from here)
+    prompt = "".join(prompt_parts)             # full prompt string
 
-    response = messages[-1]['content'] + "<|im_end|>"
+    response = messages[-1]['content'] + "<|im_end|>"  # assistant reply + closing tag
 
-    return {"prompt": prompt, "response": response}
+    return {"prompt": prompt, "response": response}  # model sees prompt, generates response
 
 
 ds_sft = smoltalk_simplified.map(format_input_output)
@@ -91,12 +131,16 @@ def tokenize_helper(example):
     prompt   = example['prompt']
     response = example['response']
 
-    prompt_ids   = tokenizer(prompt,   add_special_tokens=False)['input_ids']
-    response_ids = tokenizer(response, add_special_tokens=False)['input_ids']
+    prompt_ids   = tokenizer(prompt,   add_special_tokens=False)['input_ids']  # tokenize prompt only
+    response_ids = tokenizer(response, add_special_tokens=False)['input_ids']  # tokenize response only
+    # add_special_tokens=False: we already handle formatting manually in ChatML
 
-    input_ids      = prompt_ids + response_ids
-    attention_mask = [1] * len(input_ids)
+    input_ids      = prompt_ids + response_ids       # model sees the full sequence
+    attention_mask = [1] * len(input_ids)            # all 1s — no padding at this stage
     labels         = [-100] * len(prompt_ids) + response_ids
+    # labels: prompt part is -100 (CrossEntropyLoss skips these positions)
+    # response part keeps real token IDs (loss is computed here)
+    # -100 does NOT hide the prompt — model still sees it via input_ids
 
     return {
         "input_ids":      input_ids,
@@ -191,9 +235,10 @@ def make_trainer(model, training_args):
     trainer.add_callback(ProgressCallback)
     return trainer
 
-# ----------------------------------------------------------------
-# Task 2.2: Evaluate pretrained baseline
-# ----------------------------------------------------------------
+# 🎓 Task 2.2: Evaluate pretrained baseline
+# SmolLM2-135M without fine-tuning -> ROUGE-L 0.575 baseline
+# partially follows ChatML (pretrained with it) but generic answers (no SmolTalk)
+# ROUGE-L = Longest Common Subsequence (doesn't need to be consecutive)
 from transformers import AutoModelForCausalLM
 
 print("\n" + "=" * 80)
@@ -220,9 +265,10 @@ print(json.dumps(pretrained_metrics, indent=2))
 # Part 3: Supervised fine-tuning (full parameters)
 # ============================================================
 
-# ----------------------------------------------------------------
-# Task 3.1: Train the full model
-# ----------------------------------------------------------------
+# 🎓 Task 3.1: Train the full model
+# all 135M params, 1 epoch, fp16, batch_size=1, ~13 min
+# -100 masking: CrossEntropyLoss trains on response only (not prompt)
+# result: ROUGE-L 0.574 -> 0.674
 print("\n" + "=" * 80)
 print("FULL SFT TRAINING")
 print("=" * 80)
@@ -287,9 +333,10 @@ def replace_layers(model, named_layers):
     return model
 
 
-# ----------------------------------------------------------------
-# Task 4.2: Implement LoRA layer
-# ----------------------------------------------------------------
+# 🎓 Task 4.2: Implement LoRA layer
+# freeze W, add low-rank update: W(x) + (alpha/r)*B(A(x))
+# A: Kaiming init (non-zero so gradients flow); B: zeros init (LoRA starts at 0 = pretrained)
+# r=8: 576x8+8x576=9K vs 576x576=331K per layer -> 36x fewer params; scaling=alpha/r=2.0
 class LoRALayer(nn.Module):
     """Drop-in replacement for nn.Linear that adds a low-rank update.
 
@@ -318,9 +365,9 @@ class LoRALayer(nn.Module):
         return self.W(x) + self.scaling * self.B(self.A(x))
 
 
-# ----------------------------------------------------------------
-# Task 4.3: Fine-tune with LoRA
-# ----------------------------------------------------------------
+# 🎓 Task 4.3: Fine-tune with LoRA
+# (1) freeze all params; (2) find q/k/v/o_proj; (3) replace with LoRALayer(r=8, alpha=16)
+# 921K trainable params (0.7% of 135M) -> ROUGE-L 0.629 (~90% of full SFT gain)
 lora_model = AutoModelForCausalLM.from_pretrained(model_name_or_path).to(DEVICE)
 
 # Freeze all parameters
@@ -355,9 +402,9 @@ lora_metrics = lora_trainer.evaluate()
 print("\nLoRA EVAL METRICS:")
 print(json.dumps(lora_metrics, indent=2))
 
-# ----------------------------------------------------------------
-# Task 4.4: Qualitative inspection
-# ----------------------------------------------------------------
+# 🎓 Task 4.4: Qualitative inspection
+# pretrained: ignores instruction; full SFT: follows correctly; LoRA: mostly correct, occasional garbled tokens
+# generate_response: model.generate (temp=0.7, top_k=50) -> slice off prompt: output[0][input_ids.shape[1]:]
 def generate_response(model, prompt, max_new_tokens=100):
     """Generate a response given a formatted prompt string."""
     inputs = tokenizer(prompt, return_tensors="pt").to(DEVICE)

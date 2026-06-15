@@ -63,7 +63,9 @@ print(llm.invoke("What is the capital of France? Answer in one word."))
 # Part 3: Build the vector store
 # ============================================================
 
-# Task 3.1: Embedding model
+# 🎓 Task 3.1: Embedding model
+# MiniLM-L6-v2: text -> 384-dim vectors, trained for semantic similarity
+# same model for docs + questions -> shared vector space -> semantic search
 from langchain_huggingface import HuggingFaceEmbeddings
 
 print("\nLoading embedding model...")
@@ -94,7 +96,9 @@ chunks = text_splitter.split_documents(texts)
 print(f"Total chunks: {len(chunks)}")
 print(f"Example chunk:\n{chunks[0].page_content[:200]}")
 
-# Task 3.3: Build Chroma vector store
+# 🎓 Task 3.3: Build Chroma vector store
+# embed all chunks -> store in Chroma with cosine similarity (angle only, ignores magnitude)
+# cosine more robust than Euclidean: text vectors from long docs have larger magnitudes
 from langchain_chroma import Chroma
 
 print("\nBuilding vector store (this may take a few minutes)...")
@@ -120,6 +124,12 @@ from langchain_core.documents import Document
 from langchain.agents.middleware import AgentMiddleware, AgentState
 from langchain_core.messages import HumanMessage
 
+# ★ 🎓 Task 4.1: Defining the full RAG pipeline
+# baseline Llama 49% (guesses from general knowledge) -> RAG 69%
+# (1) MiniLM embeds all abstracts -> Chroma (cosine); chunk 512 chars / 50 overlap (MiniLM max 256 tokens)
+# (2) before_model: embed question -> search Chroma k=1 -> augmented prompt "Answer Yes/No based on context..."
+# (3) Llama reads augmented prompt only -> outputs Yes/No
+# 96/100 retrieval accuracy -> bottleneck is LLM not search; F1 0.756
 class State(AgentState):
     context: list[Document]
 
@@ -131,21 +141,24 @@ class RetrieveDocumentsMiddleware(AgentMiddleware[State]):
         self.vector_store = vector_store
 
     def before_model(self, state: AgentState) -> dict[str, Any] | None:
-        last_message = state["messages"][-1]
+        last_message = state["messages"][-1]               # get the user's question
         retrieved_docs = self.vector_store.similarity_search(last_message.content, k=1)
+        # embed the question and find the 1 most similar chunk in Chroma (cosine similarity)
 
-        docs_content = "\n\n".join(doc.page_content for doc in retrieved_docs)
+        docs_content = "\n\n".join(doc.page_content for doc in retrieved_docs)  # chunk text
 
         augmented_message_content = (
             f"Answer the following medical question with only 'Yes' or 'No', "
             f"based on the provided context.\n\n"
-            f"Context:\n{docs_content}\n\n"
-            f"Question: {last_message.content}\n\n"
-            f"Answer (Yes or No):"
+            f"Context:\n{docs_content}\n\n"        # retrieved paper chunk goes here
+            f"Question: {last_message.content}\n\n"  # original question
+            f"Answer (Yes or No):"                  # prompt the model to answer concisely
         )
         return {
             "messages": [last_message.model_copy(update={"content": augmented_message_content})],
-            "context": retrieved_docs,
+            # replace the original bare question with the augmented prompt
+            # LLM only ever sees this version — never the bare question
+            "context": retrieved_docs,             # save retrieved docs for Task 5.2 evaluation
         }
 
 
@@ -170,7 +183,10 @@ for step in agent.stream(
 # Part 5: Evaluation
 # ============================================================
 
-# Task 5.1: Evaluate RAG vs no-retrieval baseline
+# 🎓 Task 5.1: Evaluate RAG vs no-retrieval baseline
+# use_rag=True/False; extract yes/no by response.startswith; compare to gold label
+# F1 needed: class imbalance -> always-yes model gets high accuracy but is useless
+# RAG: acc=0.69, F1=0.756; baseline: acc=0.49
 def extract_yes_no(text):
     """Extract Yes/No from model output."""
     text = text.strip().lower()
@@ -238,7 +254,10 @@ print(f"EVALUATING BASELINE (no retrieval, n={EVAL_SAMPLE})")
 print('='*60)
 base_preds, base_labels, base_valid, _ = evaluate_rag(sample, use_rag=False)
 
-# Task 5.2: Check if correct documents were retrieved
+# 🎓 Task 5.2: Check if correct documents were retrieved
+# compare retrieved chunk's doc_id vs gold_document_id -> 96/100 correct
+# LLM still gets 31% wrong: relevant sentence in different chunk, or misreads medical text
+# to improve: k>1 chunks or larger/medical LLM
 correct_retrieval = 0
 total_retrieval = 0
 for idx, ret_id in zip(rag_valid, rag_retrieved):
